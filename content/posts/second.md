@@ -1,12 +1,17 @@
 +++
 title = "星野源公演 電子チケットトラブル"
 date = 2025-09-21T21:14:30+09:00
+lastmod = 2025-09-22T10:00:00+09:00  # 任意。Gitの最終更新を使うなら省略可
+tags = ["芸能", "ライブ", "チケット"]
+categories = ["ニュース"]
+# アイキャッチ（あるなら）
+cover = { image = "/images/ChatGPT Image cup.png", alt = "コーヒーまぐ", relative = false }
 draft = false
-tags = ["芸能", "ライブ", "チケット", "ニュース要約"]
-# 公開URLが決まっていれば description や image も追加可
-# description = "星野源の公演で発生したとされる電子チケット関連のトラブルについての要約と所感。"
-image = "/images/ChatGPT Image cup.png"
 +++
+
+
+げんちゃん、いったいにゃにが起きたのにゃー
+<!--more-->
 
 **出典**： [Yahoo!ニュース（ピックアップ）](https://news.yahoo.co.jp/pickup/6553180?source=rss)
 

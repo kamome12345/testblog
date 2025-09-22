@@ -1,4 +1,45 @@
 baseURL = "https://kamome12345.github.io/testblog/"
 languageCode = "ja-jp"
-title = "testblog"
-theme = "ananke"
+title = "ゴシッぷにゃ"
+theme = "papermod"
+
+# 要約の長さ（一覧で本文を出さず“要約だけ”にする）
+summaryLength = 30
+
+# Git の最終更新時刻を Lastmod として使う（更新日時表示用）
+enableGitInfo = true
+
+# タグ・カテゴリ（/tags/ /categories/ 生成）
+[taxonomies]
+  tag = "tags"
+  category = "categories"
+
+[params]
+  # 一覧に要約と日付を出す（本文は出さない）
+  ShowSummary = true
+  ShowDate = true
+  ShowLastMod = true
+
+  # （任意）パンくずやナビなど
+  ShowPostNavLinks = true
+  ShowBreadCrumbs = true
+  ShowShareButtons = false
+  ShowReadingTime = false
+
+  # Home の表示をブログ一覧に（“ヒーロー”文言を消して一覧を出したい場合）
+  disableSpecial1stPost = true
+  homeInfoParams = { Title = "", Content = "" }  # 無表示にしたい場合の小技
+
+# 日付表示のフォーマット（任意）
+[params.assets]
+  disableHLJS = true
+  
+[menu]
+  [[menu.main]]
+    name = "アーカイブ"
+    url = "/archives/"
+    weight = 10
+  [[menu.main]]
+    name = "タグ"
+    url = "/tags/"
+    weight = 20

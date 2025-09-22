@@ -1,0 +1,20 @@
+{{ define "main" }}
+  <main class="container">
+    <h1>{{ .Title }}</h1>
+    {{ $pages := .Site.RegularPages }}
+    {{ range $year, $yearPages := $pages.GroupByDate "2006" }}
+      <h2>{{ $year }}</h2>
+      {{ range $month, $monthPages := $yearPages.Pages.GroupByDate "2006-01" }}
+        <h3>{{ (time (printf "%s-01" $month)).Format "2006年01月" }}</h3>
+        <ul>
+          {{ range $monthPages }}
+            <li>
+              <a href="{{ .RelPermalink }}">{{ .Title }}</a>
+              <small>（{{ .Date.Format "2006-01-02" }}{{ with .Lastmod }} / 更新: {{ .Format "2006-01-02" }}{{ end }}）</small>
+            </li>
+          {{ end }}
+        </ul>
+      {{ end }}
+    {{ end }}
+  </main>
+{{ end }}
