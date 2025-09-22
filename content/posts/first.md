@@ -5,7 +5,12 @@ title = 'First'
 summaryLength = 30
 tags = ["芸能", "結婚", "電撃"]
 
-cover = { image = "/images/glass.png", alt = "コップ", relative = false, hidden = false }
+[cover]
+image = "/images/glass.png"
+alt = "カップ"
+relative = false
+hidden = false
++++
 +++
 
 
