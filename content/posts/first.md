@@ -6,11 +6,6 @@ summaryLength = 30
 tags = ["芸能", "ライブ", "チケット"]
 categories = ["ニュース"]
 
-cover:
-  image: "![コーヒーまぐ](../../static/images/glass.png)"
-  relative: false
-  hidden: false
-
 +++
 
 
