@@ -1,0 +1,4 @@
+baseURL = "http://localhost/"
+languageCode = "ja-jp"
+title = "testblog"
+theme = "ananke"
