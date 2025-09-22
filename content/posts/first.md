@@ -7,7 +7,7 @@ tags = ["芸能", "結婚", "電撃"]
 
 [cover]
 image = "/images/glass.png"
-alt = "カップ"
+alt = "グラス"
 relative = false
 hidden = false
 +++

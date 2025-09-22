@@ -33,6 +33,12 @@ enableGitInfo = true
 # 日付表示のフォーマット（任意）
 [params.assets]
   disableHLJS = true
+
+[params.cover]
+responsiveImages = false
+hidden = false
+hiddenInList = false
+hiddenInSingle = false
   
 [menu]
   [[menu.main]]
