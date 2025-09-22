@@ -1,15 +1,15 @@
 +++
 title = "星野源公演 電子チケットトラブル"
 date = 2025-09-21T21:14:30+09:00
-lastmod = 2025-09-22T10:00:00+09:00  # 任意。Gitの最終更新を使うなら省略可
+lastmod = 2025-09-22T10:00:00+09:00
 draft = false
 tags = ["芸能", "ライブ", "チケット"]
-categories = ["ニュース"]
-cover:
-  image: "/images/chatgpt-image-cup.png"
-  alt: "コーヒーまぐ"
-  relative: false
-  hidden: false
+
+[cover]
+image = "/images/chatgpt-image-cup.png"
+alt = "コーヒーまぐ"
+relative = false
+hidden = false
 +++
 
 
