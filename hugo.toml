@@ -1,4 +1,4 @@
-baseURL = "http://localhost/"
+baseURL = "https://kamome12345.github.io/testblog/"
 languageCode = "ja-jp"
 title = "testblog"
 theme = "ananke"
