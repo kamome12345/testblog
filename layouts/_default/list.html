@@ -62,17 +62,28 @@
               {{ if or $showDate $showLastmod }}
                 <div class="list-card__meta">
                   {{ if $showDate }}
-                    <time datetime="{{ $page.Date.Format "2006-01-02T15:04:05Z07:00" }}">{{ $page.Date.Format "2006-01-02" }}</time>
+                    <time datetime="{{ $page.Date.Format "2006-01-02T15:04:05Z07:00" }}">
+                      {{ $page.Date.Format "2006-01-02 15:04" }}
+                    </time>
                   {{ end }}
-                  {{ if and $showLastmod (ne ($page.Lastmod.Format "2006-01-02") ($page.Date.Format "2006-01-02")) }}
-                    <span class="list-card__updated">更新: <time datetime="{{ $page.Lastmod.Format "2006-01-02T15:04:05Z07:00" }}">{{ $page.Lastmod.Format "2006-01-02" }}</time></span>
+                  {{ if and $showLastmod (ne ($page.Lastmod.Format "2006-01-02T15:04:05Z07:00") ($page.Date.Format "2006-01-02T15:04:05Z07:00")) }}
+                    <span class="list-card__updated">
+                      更新:
+                      <time datetime="{{ $page.Lastmod.Format "2006-01-02T15:04:05Z07:00" }}">
+                        {{ $page.Lastmod.Format "2006-01-02 15:04" }}
+                      </time>
+                    </span>
                   {{ end }}
                 </div>
               {{ end }}
               {{ if $showSummary }}
-                {{ with $page.Summary }}
+                {{ with $page.Params.description }}
                   <p class="list-card__summary">{{ . | plainify }}</p>
-                {{ end }}
+                {{ else }}
+                  {{ with $page.Summary }}
+                    <p class="list-card__summary">{{ . | plainify }}</p>
+                 {{ end }}
+               {{ end }}
               {{ end }}
             </div>
           </article>
