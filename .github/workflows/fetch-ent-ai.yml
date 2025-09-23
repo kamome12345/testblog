@@ -34,7 +34,7 @@ jobs:
           python-version: "3.11"
 
       # （任意だが便利）キーの“形”だけ検査して即落ち
-      - name: Preflight: check OPENAI_API_KEY shape (masked)
+      - name: "Preflight: check OPENAI_API_KEY shape (masked)"
         run: |
           if [ -z "${OPENAI_API_KEY}" ]; then
             echo "OPENAI_API_KEY is empty"; exit 1
@@ -72,12 +72,14 @@ jobs:
           SKIP_IMAGE: "0"
         run: python scripts/rss_to_hugo_ai.py
 
-      - name: Show git status (debug)
+      - name: "Show git status (debug)"
+        env:
+          HUGO_POSTS_DIR: "content/posts"   # 上の設定と合わせる
         run: |
           git status --porcelain
           ls -R "${HUGO_POSTS_DIR}" || true
 
-      - name: Commit & Push if changed
+      - name: "Commit & Push if changed"
         run: |
           if [ -n "$(git status --porcelain)" ]; then
             git config user.name  "github-actions[bot]"
