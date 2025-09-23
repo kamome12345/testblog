@@ -1,0 +1,31 @@
+{{ define "main" }}
+<main class="main list" id="main-content" style="max-width: 860px; margin: 2rem auto; padding: 0 1rem;">
+  {{ if and (not .IsHome) (.Title) }}
+    <header class="page-header">
+      <h1>{{ .Title }}</h1>
+      {{ with .Description }}<div class="page-description">{{ . | markdownify }}</div>{{ end }}
+    </header>
+  {{ end }}
+
+  {{ $pages := .Pages.ByDate.Reverse }}
+  {{ $paginator := .Paginate $pages }}
+  {{ if gt $paginator.TotalPages 0 }}
+    {{ range $paginator.Pages }}
+      <article style="margin: 1.25rem 0; padding: 1rem 0; border-bottom: 1px solid #ddd;">
+        <h2 style="margin:0 0 .25rem 0; font-size:1.25rem;">
+          <a href="{{ .RelPermalink }}">{{ .Title }}</a>
+        </h2>
+        <div style="opacity:.7; font-size:.95rem; margin-bottom:.25rem;">
+          <time datetime="{{ .Date }}">{{ .Date.Format "2006-01-02" }}</time>
+        </div>
+        {{ with .Params.description }}
+          <p style="margin:.25rem 0 0 0;">{{ . | plainify }}</p>
+        {{ end }}
+      </article>
+    {{ end }}
+    {{ template "_internal/pagination.html" . }}
+  {{ else }}
+    <p class="list-empty">投稿がありません。</p>
+  {{ end }}
+</main>
+{{ end }}
