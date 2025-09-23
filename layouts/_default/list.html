@@ -34,7 +34,7 @@
               {{ $imagePath = . }}
             {{ end }}
           {{ end }}
-          {{ $coverResource := nil }}
+          {{ $coverResource := false }}
           {{ if $imagePath }}
             {{ with $page.Resources.GetMatch $imagePath }}
               {{ $coverResource = . }}
