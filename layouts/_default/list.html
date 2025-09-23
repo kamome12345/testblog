@@ -19,6 +19,9 @@
       {{ end }}
     {{ end }}
 
+    {{/* ★ 作成日時（PublishDate）で新しい順に並べ替え */}}
+    {{ $pages = $pages.ByPublishDate.Reverse }}
+
     {{ $paginator := .Paginate $pages }}
     {{ if gt $paginator.TotalPages 0 }}
       {{ $showSummary := default false .Site.Params.ShowSummary }}
@@ -85,8 +88,8 @@
                 {{ else }}
                   {{ with $page.Summary }}
                     <p class="list-card__summary">{{ . | plainify }}</p>
-                 {{ end }}
-               {{ end }}
+                  {{ end }}
+                {{ end }}
               {{ end }}
             </div>
           </article>
