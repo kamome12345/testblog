@@ -336,7 +336,9 @@ def build_front_matter(title, date_iso, publish_iso, link, description_text, inc
         f'canonicalURL: "{link}"',
     ]
     if source_title:
-        fm.append(f'sourceTitle: "{source_title.replace(\'"\', "\')}"')  # 元のYahoo見出しを保持
+    safe_source_title = source_title.replace('"', "'")
+    fm.append(f'sourceTitle: "{safe_source_title}"')
+    
     if include_cover:
         fm += [
             "cover:",
