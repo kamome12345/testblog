@@ -5,6 +5,7 @@ import feedparser, requests
 from bs4 import BeautifulSoup
 from slugify import slugify
 from tenacity import retry, wait_exponential, stop_after_attempt
+from email.utils import parsedate_to_datetime
 
 FEED_URL   = os.environ.get("FEED_URL", "https://news.yahoo.co.jp/rss/topics/entertainment.xml")
 POSTS_DIR  = os.environ.get("HUGO_POSTS_DIR", "content/posts")
@@ -73,7 +74,69 @@ def openai_headers():
         "Content-Type": "application/json",
     }
 
-@retry(wait=wait_exponential(multiplier=1, min=1, max=20), stop=stop_after_attempt(3))
+def _parse_openai_error(response):
+    try:
+        payload = response.json()
+    except ValueError:
+        return None, None
+    if not isinstance(payload, dict):
+        return None, None
+    error = payload.get("error")
+    if isinstance(error, dict):
+        return error.get("type") or error.get("code"), error.get("message")
+    return None, None
+
+
+def _retry_after_seconds(response):
+    header = response.headers.get("Retry-After")
+    if not header:
+        return None
+    try:
+        return max(0, int(float(header)))
+    except (TypeError, ValueError):
+        try:
+            retry_dt = parsedate_to_datetime(header)
+        except (TypeError, ValueError):
+            return None
+        if retry_dt is None:
+            return None
+        if retry_dt.tzinfo is None:
+            retry_dt = retry_dt.replace(tzinfo=datetime.timezone.utc)
+        now = datetime.datetime.now(datetime.timezone.utc)
+        return max(0, (retry_dt - now).total_seconds())
+
+
+def _handle_rate_limit(response, context):
+    if response.status_code != 429:
+        return
+    error_type, error_message = _parse_openai_error(response)
+
+    fatal_quota = False
+    if error_type and "insufficient_quota" in error_type:
+        fatal_quota = True
+    elif error_message:
+        lowered = error_message.lower()
+        fatal_quota = "insufficient quota" in lowered or "exceeded your current quota" in lowered or "billing hard limit" in lowered
+
+    if fatal_quota:
+        raise SystemExit(
+            "OpenAI API quota appears to be exhausted. "
+            f"Context: {context}. Message: {error_message or 'insufficient quota'}"
+        )
+
+    wait_for = _retry_after_seconds(response)
+    if not wait_for:
+        wait_for = 30
+    wait_for = max(wait_for, 10)
+    extra_info = f" ({error_message})" if error_message else ""
+    print(
+        f"OpenAI rate limit hit during {context}. Waiting {int(wait_for)}s before retrying...{extra_info}",
+        flush=True,
+    )
+    time.sleep(wait_for)
+
+
+@retry(wait=wait_exponential(multiplier=1, min=1, max=20), stop=stop_after_attempt(5))
 def gen_article(title, url, summary):
     payload = {
         "model": LLM_MODEL,
@@ -84,10 +147,11 @@ def gen_article(title, url, summary):
         "temperature": 0.7,
     }
     r = requests.post(f"{OPENAI_BASE}/chat/completions", headers=openai_headers(), json=payload, timeout=60)
+    _handle_rate_limit(r, "article generation")
     r.raise_for_status()
     return r.json()["choices"][0]["message"]["content"].strip()
 
-@retry(wait=wait_exponential(multiplier=1, min=1, max=20), stop=stop_after_attempt(3))
+@retry(wait=wait_exponential(multiplier=1, min=1, max=20), stop=stop_after_attempt(5))
 def gen_image_png(title):
     prompt = IMG_PROMPT_TEMPLATE.format(title=title)
     payload = {
@@ -97,6 +161,7 @@ def gen_image_png(title):
         "n": 1,
     }
     r = requests.post(f"{OPENAI_BASE}/images/generations", headers=openai_headers(), json=payload, timeout=120)
+    _handle_rate_limit(r, "image generation")
     r.raise_for_status()
     data = r.json()["data"][0]
     if "b64_json" in data:
