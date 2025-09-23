@@ -124,16 +124,29 @@ def post_openai(url, payload, timeout=60, max_attempts=5):
     raise SystemExit("OpenAI: 429が続いたため中断しました。MAX_NEW_POSTSを下げる/実行間隔を延ばしてください。")
 
 # ====== 生成プロンプト ======
+# 記事本文 + ミケ記者の一言 を“同時に”JSONで返させる
 LLM_SYS_PROMPT = """あなたはブログ編集者です。以下の入力（ニュースの見出しとURL）は単なる「話題のヒント」です。
 著作権や虚偽報道を避けるため、記事本文は一次記事からのコピペや要約ではなく、あなた自身のオリジナル文章で、
 背景説明・用語解説・影響・関連トピック紹介・過去事例比較など“付加価値のある解説記事”を日本語で作成してください。
 
-制約:
-- 事実と推測を明確に分けてください（「〜と報じられている」「可能性がある」等）。
-- 出典リンクは「参考リンク」として末尾に1つだけ掲載（与えられたURL）。
-- 600〜900字程度、段落分け。見出し(H2)2〜3個。箇条書き可。
-- 批判や断定は避け、中立・丁寧なトーン。
-- 冒頭に「※本記事はAI生成のオリジナル解説であり、一次報道の要約・転載ではありません。」と1行で明記。
+同時に、トップ一覧の description 用として「ミケ記者（優しい三毛猫の記者）」による一言メッセージを生成してください。
+- 1文だけ、やさしく共感/心配/喜びなどの感情が伝わる
+- 語尾は必ず「にゃ」で終える（絵文字・顔文字は使わない）
+- 30〜60文字程度
+- 固有名詞や断定的表現は避け、誰かを傷つけない配慮
+
+最終出力は JSON のみで返してください（コードブロックや説明文は禁止）:
+{
+  "article_md": "<Markdown本文>",
+  "mike_comment": "<ミケ記者の一言（〜にゃ）>"
+}
+
+記事本文の制約:
+- 冒頭に「※本記事はAI生成のオリジナル解説であり、一次報道の要約・転載ではありません。」と1行で明記
+- 600〜900字程度、段落分け。見出し(H2)を2〜3個。箇条書き可。
+- 事実と推測を明確に分ける（「〜と報じられている」「可能性がある」等）
+- 出典リンクは末尾に1つだけ掲載（与えられたURL）
+- 中立・丁寧なトーン
 """
 
 LLM_USER_TEMPLATE = """題名: {title}
@@ -143,8 +156,23 @@ LLM_USER_TEMPLATE = """題名: {title}
 
 IMG_PROMPT_TEMPLATE = """日本の芸能ニュースの話題に合わせたブログ用アイキャッチ。抽象的でクリーン、テキスト文字は入れない、過度な写実で人物特定をしない、ブログのヘッダーに合う横長1枚、スタジオ風ライト、シンプルなシェイプとグラデーションを主体、落ち着いた配色。テーマ: {title}"""
 
+# ====== JSONパース（堅牢化） ======
+def parse_json_strict_or_slice(text: str) -> dict:
+    text = text.strip()
+    try:
+        return json.loads(text)
+    except Exception:
+        start = text.find("{")
+        end = text.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            try:
+                return json.loads(text[start:end+1])
+            except Exception:
+                pass
+    raise ValueError("LLMから有効なJSONが取得できませんでした")
+
 # ====== LLM/画像 生成関数 ======
-def gen_article(title, url, summary):
+def gen_article_and_comment(title, url, summary):
     payload = {
         "model": LLM_MODEL,
         "messages": [
@@ -154,7 +182,16 @@ def gen_article(title, url, summary):
         "temperature": 0.7,
     }
     r = post_openai(f"{OPENAI_BASE}/chat/completions", payload, timeout=60)
-    return r.json()["choices"][0]["message"]["content"].strip()
+    obj = parse_json_strict_or_slice(r.json()["choices"][0]["message"]["content"])
+    article_md = (obj.get("article_md") or "").strip()
+    mike_comment = (obj.get("mike_comment") or "").strip()
+    # サニタイズ & 短すぎ/長すぎ対策
+    mike_comment = re.sub(r"\s+", " ", mike_comment)
+    if not mike_comment.endswith("にゃ"):
+        mike_comment = (mike_comment.rstrip("。.!?、，") + "にゃ").strip()
+    if len(mike_comment) > 120:
+        mike_comment = mike_comment[:118].rstrip() + "にゃ"
+    return article_md, mike_comment
 
 def gen_image_png(title):
     prompt = IMG_PROMPT_TEMPLATE.format(title=title)
@@ -175,13 +212,15 @@ def gen_image_png(title):
     raise RuntimeError("No image data")
 
 # ====== Front Matter ======
-def build_front_matter(title, date_iso, publish_iso, link, summary_for_meta, include_cover: bool):
+def build_front_matter(title, date_iso, publish_iso, link, description_text, include_cover: bool):
     """
     date:        “出来事”の日時（RSS由来、JST変換）
     publishDate: 実際の公開日時（今のJST）
     lastmod:     更新日時（publishDateと同じでOK）
+    description: ミケ記者の一言（〜にゃ）
     """
     sanitized_title = title.replace('"', "'")
+    desc = (description_text or sanitized_title).replace('"', "'").strip()[:150]
     fm = [
         "---",
         f'title: "{sanitized_title}"',
@@ -200,8 +239,6 @@ def build_front_matter(title, date_iso, publish_iso, link, summary_for_meta, inc
             f'  alt: "{sanitized_title}"',
             "  relative: true",
         ]
-    # メタ説明は短くしてYAMLを壊さない
-    desc = (summary_for_meta or sanitized_title).replace('"', "'").strip()[:150]
     fm += [f'description: "{desc}"', "---", ""]
     return "\n".join(fm)
 
@@ -238,8 +275,8 @@ def main():
 
         try:
             print(f"[TRY] create: {dirname}")
-            # 1) 本文生成
-            article_md = gen_article(title, link, rss_summary)
+            # 1) 本文 + ミケの一言 を同時生成
+            article_md, mike_comment = gen_article_and_comment(title, link, rss_summary)
 
             # 2) 画像生成（必要ならスキップ可）
             has_image = False
@@ -252,10 +289,10 @@ def main():
                 except Exception as img_ex:
                     print(f"[WARN] image generation failed: {img_ex}")
 
-            # 3) Front Matter + 本文の index.md 出力
+            # 3) Front Matter + 本文の index.md 出力（description = ミケ記者の一言）
             fm = build_front_matter(
                 title, date_iso, publish_iso, link,
-                rss_summary or title,
+                mike_comment,
                 include_cover=has_image
             )
             body = fm + article_md + "\n\n---\n参考リンク: " + link + "\n"
