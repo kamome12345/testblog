@@ -85,7 +85,6 @@ def post_openai(url, payload, timeout=60, max_attempts=5):
     """
     for attempt in range(1, max_attempts + 1):
         r = requests.post(url, headers=openai_headers(), json=payload, timeout=timeout)
-        # 429は二種類あるので本文を見る
         if r.status_code == 429:
             try:
                 body = r.json()
@@ -94,14 +93,11 @@ def post_openai(url, payload, timeout=60, max_attempts=5):
                 msg  = (err.get("message") or "").lower()
             except Exception:
                 code = msg = ""
-
             if "insufficient_quota" in (code + msg):
                 raise SystemExit(
                     "OpenAI: 残高不足/課金未設定により拒否されました。"
                     "PlatformのBillingでプリペイド（最低$5）を追加してください。"
                 )
-
-            # レート制限 → Retry-Afterを尊重して待機
             retry_after = 0
             try:
                 retry_after = int(r.headers.get("retry-after", "30"))
@@ -111,20 +107,22 @@ def post_openai(url, payload, timeout=60, max_attempts=5):
             print(f"Rate limited (attempt {attempt}/{max_attempts}). Sleeping {wait}s...")
             time.sleep(wait)
             continue
-
-        # その他のエラーはそのまま出す
         try:
             r.raise_for_status()
         except requests.HTTPError as e:
             if r.status_code == 401:
                 raise SystemExit("OpenAI: 認証エラー（APIキーが正しいか確認してください）。") from e
+            # エラー本文も出す
+            try:
+                print("[ERROR] OpenAI response:", r.json())
+            except Exception:
+                print("[ERROR] OpenAI response (non-JSON):", r.text[:500])
             raise
         return r
-
     raise SystemExit("OpenAI: 429が続いたため中断しました。MAX_NEW_POSTSを下げる/実行間隔を延ばしてください。")
 
 # ====== 生成プロンプト ======
-# 記事本文 + ミケ記者の一言 を“同時に”JSONで返させる
+# 記事本文 + ミケ記者の一言 + タグ配列 を“同時に”JSONで返させる
 LLM_SYS_PROMPT = """あなたはブログ編集者です。以下の入力（ニュースの見出しとURL）は単なる「話題のヒント」です。
 著作権や虚偽報道を避けるため、記事本文は一次記事からのコピペや要約ではなく、あなた自身のオリジナル文章で、
 背景説明・用語解説・影響・関連トピック紹介・過去事例比較など“付加価値のある解説記事”を日本語で作成してください。
@@ -135,10 +133,16 @@ LLM_SYS_PROMPT = """あなたはブログ編集者です。以下の入力（ニ
 - 30〜60文字程度
 - 固有名詞や断定的表現は避け、誰かを傷つけない配慮
 
+さらに、記事に付与するタグも抽出してください。
+- 日本語の一般名詞だけ（例：芸人、女優、俳優、マンガ、結婚、イベント、音楽 等）
+- 人名・団体名・作品固有名を避ける
+- 3〜5個、短め（10文字以内）、記号(#・/・,・. など)を含めない
+
 最終出力は JSON のみで返してください（コードブロックや説明文は禁止）:
 {
   "article_md": "<Markdown本文>",
-  "mike_comment": "<ミケ記者の一言（〜にゃ）>"
+  "mike_comment": "<ミケ記者の一言（〜にゃ）>",
+  "tags": ["タグ1","タグ2","タグ3"]
 }
 
 記事本文の制約:
@@ -171,8 +175,34 @@ def parse_json_strict_or_slice(text: str) -> dict:
                 pass
     raise ValueError("LLMから有効なJSONが取得できませんでした")
 
+# ====== タグ整形 ======
+def sanitize_tags(raw):
+    out = []
+    if isinstance(raw, list):
+        for t in raw:
+            if not isinstance(t, str): continue
+            s = t.strip().replace("　", " ")
+            s = re.sub(r"\s+", "", s)              # 空白除去（短い名詞想定）
+            if not s: continue
+            if len(s) > 10: s = s[:10]
+            if re.search(r"[#/,.\[\]{}()!?:;\"'<>\\|@^~`+=*&%$]", s):
+                continue
+            # 人名っぽい（カタカナ+姓っぽい等）は簡易に除外（完璧ではない）
+            if re.search(r"[A-Za-z]", s):  # 英単語は今回は弾く（必要なら許可）
+                continue
+            out.append(s)
+    # 重複除去の順序維持
+    uniq = []
+    for x in out:
+        if x not in uniq:
+            uniq.append(x)
+    # 3〜5個に調整
+    if len(uniq) < 3:
+        return uniq
+    return uniq[:5]
+
 # ====== LLM/画像 生成関数 ======
-def gen_article_and_comment(title, url, summary):
+def gen_article_comment_tags(title, url, summary):
     payload = {
         "model": LLM_MODEL,
         "messages": [
@@ -185,16 +215,20 @@ def gen_article_and_comment(title, url, summary):
     obj = parse_json_strict_or_slice(r.json()["choices"][0]["message"]["content"])
     article_md = (obj.get("article_md") or "").strip()
     mike_comment = (obj.get("mike_comment") or "").strip()
-    # サニタイズ & 短すぎ/長すぎ対策
+    tags = sanitize_tags(obj.get("tags"))
+    # ミケの一言サニタイズ
     mike_comment = re.sub(r"\s+", " ", mike_comment)
     if not mike_comment.endswith("にゃ"):
         mike_comment = (mike_comment.rstrip("。.!?、，") + "にゃ").strip()
     if len(mike_comment) > 120:
         mike_comment = mike_comment[:118].rstrip() + "にゃ"
-    return article_md, mike_comment
+    return article_md, mike_comment, tags
 
-def gen_image_png(title):
-    prompt = IMG_PROMPT_TEMPLATE.format(title=title)
+def gen_image_png(title, extra_hint_tags=None):
+    hint = ""
+    if extra_hint_tags:
+        hint = "（キーワード: " + "・".join(extra_hint_tags[:3]) + "）"
+    prompt = IMG_PROMPT_TEMPLATE.format(title=title + hint)
     payload = {
         "model": IMG_MODEL,
         "prompt": prompt,
@@ -202,25 +236,36 @@ def gen_image_png(title):
         "n": 1,
     }
     r = post_openai(f"{OPENAI_BASE}/images/generations", payload, timeout=120)
-    data = r.json()["data"][0]
+    data = r.json().get("data", [{}])[0]
     if "b64_json" in data:
         return base64.b64decode(data["b64_json"])
     if "url" in data:
         img = requests.get(data["url"], timeout=60)
         img.raise_for_status()
         return img.content
-    raise RuntimeError("No image data")
+    raise RuntimeError("No image data in response")
 
 # ====== Front Matter ======
-def build_front_matter(title, date_iso, publish_iso, link, description_text, include_cover: bool):
+def build_front_matter(title, date_iso, publish_iso, link, description_text, include_cover, extra_tags):
     """
     date:        “出来事”の日時（RSS由来、JST変換）
     publishDate: 実際の公開日時（今のJST）
     lastmod:     更新日時（publishDateと同じでOK）
     description: ミケ記者の一言（〜にゃ）
+    tags:        既定の ["AI記事","Entertainment"] に加え、抽出タグ（3〜5）
     """
     sanitized_title = title.replace('"', "'")
     desc = (description_text or sanitized_title).replace('"', "'").strip()[:150]
+
+    base_tags = ["AI記事", "Entertainment"]
+    for t in extra_tags or []:
+        if t not in base_tags:
+            base_tags.append(t)
+
+    # YAML配列の各要素を安全にクォート
+    def yq(x): return '"' + str(x).replace('"', "'") + '"'
+    tags_line = "tags: [" + ",".join(yq(t) for t in base_tags) + "]"
+
     fm = [
         "---",
         f'title: "{sanitized_title}"',
@@ -229,7 +274,7 @@ def build_front_matter(title, date_iso, publish_iso, link, description_text, inc
         f"lastmod: {publish_iso}",
         "draft: false",
         f'categories: ["{CATEGORY}"]',
-        'tags: ["AI記事","Entertainment"]',
+        tags_line,
         f'canonicalURL: "{link}"',
     ]
     if include_cover:
@@ -275,25 +320,24 @@ def main():
 
         try:
             print(f"[TRY] create: {dirname}")
-            # 1) 本文 + ミケの一言 を同時生成
-            article_md, mike_comment = gen_article_and_comment(title, link, rss_summary)
+            # 1) 本文 + ミケの一言 + タグ を同時生成
+            article_md, mike_comment, extra_tags = gen_article_comment_tags(title, link, rss_summary)
 
             # 2) 画像生成（必要ならスキップ可）
             has_image = False
             if not SKIP_IMAGE:
                 try:
-                    img_bytes = gen_image_png(title)
+                    img_bytes = gen_image_png(title, extra_hint_tags=extra_tags)
                     with open(post_dir / "featured.png", "wb") as f:
                         f.write(img_bytes)
                     has_image = True
                 except Exception as img_ex:
                     print(f"[WARN] image generation failed: {img_ex}")
 
-            # 3) Front Matter + 本文の index.md 出力（description = ミケ記者の一言）
+            # 3) Front Matter + 本文の index.md 出力
             fm = build_front_matter(
                 title, date_iso, publish_iso, link,
-                mike_comment,
-                include_cover=has_image
+                mike_comment, include_cover=has_image, extra_tags=extra_tags
             )
             body = fm + article_md + "\n\n---\n参考リンク: " + link + "\n"
             with open(post_dir / "index.md", "w", encoding="utf-8") as f:
@@ -304,8 +348,7 @@ def main():
             created += 1
             print(f"[OK] created: {post_dir}")
 
-            # 保険で少し待つ（次ループに進む前）
-            time.sleep(2)
+            time.sleep(2)  # 保険
 
         except requests.HTTPError as http_ex:
             try:
