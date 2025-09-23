@@ -156,24 +156,21 @@ def post_openai(url, payload, timeout=60, max_attempts=5):
 # ====== 生成プロンプト ======
 # 記事本文 + ミケ記者の一言 + タグ配列 を“同時に”JSONで返させる
 LLM_SYS_PROMPT = """あなたはブログ編集者です。以下の入力（ニュースの見出しとURL）は単なる「話題のヒント」です。
-著作権や虚偽報道を避けるため、記事本文は一次記事からのコピペや要約ではなく、あなた自身のオリジナル文章で、
-背景説明・用語解説・影響・関連トピック紹介・過去事例比較など“付加価値のある解説記事”を日本語で作成してください。
+本文は一次記事の要約・転載ではなく、背景説明・用語解説・影響・関連トピック・過去事例比較など付加価値のある解説を日本語で作成してください。
 
-同時に、トップ一覧の description 用として「ミケ記者（優しい三毛猫の記者）」による一言メッセージ候補を6つ生成してください。
-- 1文だけ、**思わず本文を読みたくなる**導入（問いかけ/驚き/気づき/優しい励まし など）を使う
-- それぞれ**語り口を変えて**重複を避ける（語尾・語順・表現を変化させる）
-- 語尾は必ず「にゃ」で終える（絵文字・顔文字は使わない）
-- 文字数は **30〜60字** 目安（長すぎ/短すぎを避ける）
-- 固有名詞や断定的表現は避け、誰かを傷つけない配慮
-- 例：「もしかして…？」「やばい○○」等の**フック**を混ぜる
+同時に、トップ一覧の description 用として「ミケ記者（優しい三毛猫の記者）」の一言“候補を6つ”生成してください。
+- 1文だけ／30〜60字／語尾は必ず「にゃ」／語り口を変えて重複回避／誰かを傷つけない配慮
 
-さらに、記事に付与するタグも抽出してください。
-- 日本語の一般名詞だけ（例：芸人、女優、俳優、マンガ、結婚、イベント、音楽 等）
-- 人名・団体名・作品固有名を避ける
-- 3〜5個、短め（10文字以内）、記号(#・/・,・. など)を含めない
+さらに、記事に付与するタグを抽出してください（一般名詞のみ、人名・団体名・固有作品名は避ける、3〜5個、10文字以内）。
 
-最終出力は JSON のみで返してください（コードブロックや説明文は禁止）:
+そして、**オリジナルの日本語見出し（headline_ja）**を作ってください。
+- 与えられた見出しと同一/ほぼ同一は不可
+- 20〜40文字程度、キャッチーだが煽りすぎない
+- 内容を正しく示す
+
+最終出力は JSON のみ:
 {
+  "headline_ja": "<オリジナル見出し>",
   "article_md": "<Markdown本文>",
   "mike_candidates": ["候補1","候補2","候補3","候補4","候補5","候補6"],
   "tags": ["タグ1","タグ2","タグ3"]
@@ -181,11 +178,12 @@ LLM_SYS_PROMPT = """あなたはブログ編集者です。以下の入力（ニ
 
 記事本文の制約:
 - 冒頭に「※本記事はAI生成のオリジナル解説であり、一次報道の要約・転載ではありません。」と1行で明記
-- 600〜900字程度、段落分け。見出し(H2)を2〜3個。箇条書き可。
-- 事実と推測を明確に分ける（「〜と報じられている」「可能性がある」等）
-- 出典リンクは末尾に1つだけ掲載（与えられたURL）
+- 600〜900字、段落分け、H2を2〜3個、箇条書き可
+- 事実と推測を明確化（「〜と報じられている」「可能性がある」等）
+- 出典リンクは末尾に1つ（与えられたURL）
 - 中立・丁寧なトーン
 """
+
 
 
 LLM_USER_TEMPLATE = """題名: {title}
@@ -193,7 +191,13 @@ LLM_USER_TEMPLATE = """題名: {title}
 概要ヒント（RSSのsummaryがある場合）: {summary}
 """
 
-IMG_PROMPT_TEMPLATE = """日本の芸能ニュースの話題に合わせたブログ用アイキャッチ。抽象的でクリーン、テキスト文字は入れない、過度な写実で人物特定をしない、ブログのヘッダーに合う横長1枚、スタジオ風ライト、シンプルなシェイプとグラデーションを主体、落ち着いた配色。テーマ: {title}"""
+IMG_PROMPT_TEMPLATE = """ブログ用の横長アイキャッチ。テキストは入れない。
+主役: 3頭身の元気な三毛猫キャラクター「ミケ記者」（擬人化）。
+表現: 実在の芸能人を想起させるが、写真の複製や本人そのものの精密再現は避ける。髪型・衣装・小道具・配色・ポーズで“なりきり感”を出す。ブランド/ロゴ/ユニフォームは使わない。
+スタイル: ベクター/フラット、太めのアウトライン、やわらかな配色、シンプルな図形とグラデーション。写真風/過度な写実は不可。
+出力: 横長1枚。{size_hint}
+題名ヒント: {title}
+キーワード: {keywords}"""
 
 # ====== JSONパース（堅牢化） ======
 def parse_json_strict_or_slice(text: str) -> dict:
@@ -237,42 +241,35 @@ def sanitize_tags(raw):
     return uniq[:5]
 
 # ====== LLM/画像 生成関数 ======
-def gen_article_comment_tags(title, url, summary, seen_mike_normed:set):
+def gen_article_comment_tags(title, url, summary, seen_mike_normed):
     payload = {
         "model": LLM_MODEL,
         "messages": [
             {"role": "system", "content": LLM_SYS_PROMPT},
             {"role": "user", "content": LLM_USER_TEMPLATE.format(title=title, url=url, summary=summary or "（なし）")},
         ],
-        "temperature": 0.8,  # すこし多様性を上げる
+        "temperature": 0.8,
     }
     r = post_openai(f"{OPENAI_BASE}/chat/completions", payload, timeout=60)
     obj = parse_json_strict_or_slice(r.json()["choices"][0]["message"]["content"])
+
+    headline = (obj.get("headline_ja") or "").strip()
     article_md = (obj.get("article_md") or "").strip()
     cands = obj.get("mike_candidates") or []
     tags = sanitize_tags(obj.get("tags"))
 
-    # 正規化してユニーク選抜
-    picked = None
-    picked_norm = None
+    # ミケ候補→未使用を選抜（あなたの既存ロジックを流用）
+    picked = None; picked_norm = None
     for raw in cands:
-        if not isinstance(raw, str):
-            continue
+        if not isinstance(raw, str): continue
         line = re.sub(r"\s+", " ", raw.strip())
-        if not line:
-            continue
+        if not line: continue
         if not line.endswith("にゃ"):
             line = (line.rstrip("。.!?、，") + "にゃ").strip()
-        if len(line) < 20 or len(line) > 80:
-            # 長さが外れすぎたらスキップ（ゆるめ）
-            pass
         normed = _norm_mike(line)
         if normed and normed not in seen_mike_normed:
-            picked = line
-            picked_norm = normed
+            picked, picked_norm = line, normed
             break
-
-    # 全滅時のフォールバック：最初の候補を整形
     if not picked and cands:
         line = re.sub(r"\s+", " ", str(cands[0]).strip())
         if not line.endswith("にゃ"):
@@ -280,22 +277,28 @@ def gen_article_comment_tags(title, url, summary, seen_mike_normed:set):
         picked = line
         picked_norm = _norm_mike(line)
 
-    # 最終サニタイズ
-    if picked and len(picked) > 120:
-        picked = picked[:118].rstrip() + "にゃ"
+    return headline, article_md, picked, picked_norm, tags
 
-    return article_md, picked, picked_norm, tags
 
 
 def gen_image_png(title, extra_hint_tags=None):
-    hint = ""
+    # タグからキーワードを作る（最大4語）
+    kw = ""
     if extra_hint_tags:
-        hint = "（キーワード: " + "・".join(extra_hint_tags[:3]) + "）"
-    prompt = IMG_PROMPT_TEMPLATE.format(title=title + hint)
+        kw = "、".join(extra_hint_tags[:4])
+    if not kw:
+        kw = "芸能ニュース, イベント, ステージ, インタビュー"
+
+    prompt = IMG_PROMPT_TEMPLATE.format(
+        title=title,
+        keywords=kw,
+        size_hint="1536x1024 推奨"
+    )
+
     payload = {
         "model": IMG_MODEL,
         "prompt": prompt,
-        "size": "1536x1024",   # 横長
+        "size": "1536x1024",  # 許可サイズ
         "n": 1,
     }
     r = post_openai(f"{OPENAI_BASE}/images/generations", payload, timeout=120)
@@ -309,14 +312,7 @@ def gen_image_png(title, extra_hint_tags=None):
     raise RuntimeError("No image data in response")
 
 # ====== Front Matter ======
-def build_front_matter(title, date_iso, publish_iso, link, description_text, include_cover, extra_tags):
-    """
-    date:        “出来事”の日時（RSS由来、JST変換）
-    publishDate: 実際の公開日時（今のJST）
-    lastmod:     更新日時（publishDateと同じでOK）
-    description: ミケ記者の一言（〜にゃ）
-    tags:        既定の ["AI記事","Entertainment"] に加え、抽出タグ（3〜5）
-    """
+def build_front_matter(title, date_iso, publish_iso, link, description_text, include_cover, extra_tags, source_title=None):
     sanitized_title = title.replace('"', "'")
     desc = (description_text or sanitized_title).replace('"', "'").strip()[:150]
 
@@ -325,7 +321,6 @@ def build_front_matter(title, date_iso, publish_iso, link, description_text, inc
         if t not in base_tags:
             base_tags.append(t)
 
-    # YAML配列の各要素を安全にクォート
     def yq(x): return '"' + str(x).replace('"', "'") + '"'
     tags_line = "tags: [" + ",".join(yq(t) for t in base_tags) + "]"
 
@@ -340,6 +335,8 @@ def build_front_matter(title, date_iso, publish_iso, link, description_text, inc
         tags_line,
         f'canonicalURL: "{link}"',
     ]
+    if source_title:
+        fm.append(f'sourceTitle: "{source_title.replace(\'"\', "\')}"')  # 元のYahoo見出しを保持
     if include_cover:
         fm += [
             "cover:",
@@ -349,6 +346,7 @@ def build_front_matter(title, date_iso, publish_iso, link, description_text, inc
         ]
     fm += [f'description: "{desc}"', "---", ""]
     return "\n".join(fm)
+
 
 # ====== メイン処理 ======
 def main():
@@ -385,15 +383,15 @@ def main():
         try:
             print(f"[TRY] create: {dirname}")
             # 1) 本文 + ミケ候補→ユニーク選抜 + タグ を生成
-            article_md, mike_comment, mike_norm, extra_tags = gen_article_comment_tags(
-                title, link, rss_summary, seen_mike_normed
+            headline, article_md, mike_comment, mike_norm, extra_tags = gen_article_comment_tags(
+            title, link, rss_summary, seen_mike_normed
             )       
 
             # 2) 画像生成（必要ならスキップ可）
             has_image = False
             if not SKIP_IMAGE:
                 try:
-                    img_bytes = gen_image_png(title, extra_hint_tags=extra_tags)
+                    img_bytes = gen_image_png(headline or title, extra_hint_tags=extra_tags)
                     with open(post_dir / "featured.png", "wb") as f:
                         f.write(img_bytes)
                     has_image = True
@@ -402,8 +400,10 @@ def main():
 
             # 3) Front Matter + 本文の index.md 出力
             fm = build_front_matter(
-                title, date_iso, publish_iso, link,
-                mike_comment, include_cover=has_image, extra_tags=extra_tags
+                headline or title,   # ← 表示タイトルはオリジナル優先
+                date_iso, publish_iso, link,
+                mike_comment, include_cover=has_image, extra_tags=extra_tags,
+                source_title=title   # ← 追加引数
             )
             body = fm + article_md + "\n\n---\n参考リンク: " + link + "\n"
             with open(post_dir / "index.md", "w", encoding="utf-8") as f:
