@@ -1,0 +1,90 @@
+{{ define "main" }}
+  <main class="main list" id="main-content">
+    {{ if and (not .IsHome) (.Title) }}
+      <header class="page-header">
+        <h1>{{ .Title }}</h1>
+        {{ with .Description }}
+          <div class="page-description">{{ . | markdownify }}</div>
+        {{ end }}
+      </header>
+    {{ end }}
+
+    {{ $pages := .Pages }}
+    {{ if .IsHome }}
+      {{ $mainSections := .Site.Params.mainSections }}
+      {{ if $mainSections }}
+        {{ $pages = where .Site.RegularPages "Type" "in" $mainSections }}
+      {{ else }}
+        {{ $pages = .Site.RegularPages }}
+      {{ end }}
+    {{ end }}
+
+    {{ $paginator := .Paginate $pages }}
+    {{ if gt $paginator.TotalPages 0 }}
+      {{ $showSummary := default false .Site.Params.ShowSummary }}
+      {{ $showDate := default true .Site.Params.ShowDate }}
+      {{ $showLastmod := default false .Site.Params.ShowLastMod }}
+      <div class="list-cards">
+        {{ range $paginator.Pages }}
+          {{ $page := . }}
+          {{ $coverParams := $page.Params.cover }}
+          {{ $imagePath := "" }}
+          {{ if $coverParams }}
+            {{ with $coverParams.image }}
+              {{ $imagePath = . }}
+            {{ end }}
+          {{ end }}
+          {{ $coverResource := "" }}
+          {{ if $imagePath }}
+            {{ with $page.Resources.GetMatch $imagePath }}
+              {{ $coverResource = . }}
+            {{ end }}
+          {{ end }}
+          {{ $altText := $page.Title }}
+          {{ if $coverParams }}
+            {{ with $coverParams.alt }}
+              {{ $altText = . }}
+            {{ end }}
+          {{ end }}
+          {{ $hasImage := or $coverResource $imagePath }}
+          <article class="list-card{{ if not $hasImage }} list-card--no-image{{ end }}">
+            {{ if $hasImage }}
+              <a class="list-card__image" href="{{ $page.RelPermalink }}">
+                {{ with $coverResource }}
+                  <img src="{{ .RelPermalink }}" alt="{{ $altText }}" loading="lazy" />
+                {{ else }}
+                  {{ $isRemote := or (strings.HasPrefix $imagePath "http://") (strings.HasPrefix $imagePath "https://") }}
+                  {{ $resolved := cond $isRemote $imagePath ($imagePath | absURL) }}
+                  <img src="{{ $resolved }}" alt="{{ $altText }}" loading="lazy" />
+                {{ end }}
+              </a>
+            {{ end }}
+            <div class="list-card__body">
+              <h2 class="list-card__title"><a href="{{ $page.RelPermalink }}">{{ $page.Title }}</a></h2>
+              {{ if or $showDate $showLastmod }}
+                <div class="list-card__meta">
+                  {{ if $showDate }}
+                    <time datetime="{{ $page.Date.Format "2006-01-02T15:04:05Z07:00" }}">{{ $page.Date.Format "2006-01-02" }}</time>
+                  {{ end }}
+                  {{ if and $showLastmod (ne ($page.Lastmod.Format "2006-01-02") ($page.Date.Format "2006-01-02")) }}
+                    <span class="list-card__updated">更新: <time datetime="{{ $page.Lastmod.Format "2006-01-02T15:04:05Z07:00" }}">{{ $page.Lastmod.Format "2006-01-02" }}</time></span>
+                  {{ end }}
+                </div>
+              {{ end }}
+              {{ if $showSummary }}
+                {{ with $page.Summary }}
+                  <p class="list-card__summary">{{ . | plainify }}</p>
+                {{ end }}
+              {{ end }}
+            </div>
+          </article>
+        {{ end }}
+      </div>
+      {{ if gt $paginator.TotalPages 1 }}
+        {{ partial "pagination.html" . }}
+      {{ end }}
+    {{ else }}
+      <p class="list-empty">{{ i18n "list.noPages" | default "投稿がありません。" }}</p>
+    {{ end }}
+  </main>
+{{ end }}
