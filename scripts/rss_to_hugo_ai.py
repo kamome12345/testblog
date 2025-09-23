@@ -336,9 +336,9 @@ def build_front_matter(title, date_iso, publish_iso, link, description_text, inc
         f'canonicalURL: "{link}"',
     ]
     if source_title:
-    safe_source_title = source_title.replace('"', "'")
-    fm.append(f'sourceTitle: "{safe_source_title}"')
-    
+        safe_source_title = source_title.replace('"', "'")
+        fm.append(f'sourceTitle: "{safe_source_title}"')
+
     if include_cover:
         fm += [
             "cover:",
