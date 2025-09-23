@@ -384,8 +384,10 @@ def main():
 
         try:
             print(f"[TRY] create: {dirname}")
-            # 1) 本文 + ミケの一言 + タグ を同時生成
-            article_md, mike_comment, extra_tags = gen_article_comment_tags(title, link, rss_summary)
+            # 1) 本文 + ミケ候補→ユニーク選抜 + タグ を生成
+            article_md, mike_comment, mike_norm, extra_tags = gen_article_comment_tags(
+                title, link, rss_summary, seen_mike_normed
+            )       
 
             # 2) 画像生成（必要ならスキップ可）
             has_image = False
