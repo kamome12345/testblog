@@ -242,7 +242,9 @@ def _toml_str(value: str) -> str:
 
 def write_post(bundle_dir: Path, item: FeedItem, article_md: str, image_bytes: bytes) -> None:
     bundle_dir.mkdir(parents=True, exist_ok=True)
-    cover_name = "cover.png"
+    images_dir = bundle_dir / "images"
+    images_dir.mkdir(parents=True, exist_ok=True)
+    cover_name = "images/cover.png"
     cover_path = bundle_dir / cover_name
     cover_path.write_bytes(image_bytes)
 

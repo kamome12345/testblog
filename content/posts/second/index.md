@@ -6,7 +6,7 @@ draft = false
 tags = ["芸能", "ライブ", "チケット"]
 
 [cover]
-image = "cup.png"
+image = "images/cup.png"
 alt = "コーヒーまぐ"
 relative = true
 hidden = false
