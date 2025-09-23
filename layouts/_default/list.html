@@ -46,6 +46,15 @@
               {{ $altText = . }}
             {{ end }}
           {{ end }}
+          {{ $summaryText := "" }}
+          {{ with $page.Params.summary }}
+            {{ $summaryText = . }}
+          {{ end }}
+          {{ if not $summaryText }}
+            {{ with $page.Summary }}
+              {{ $summaryText = . }}
+            {{ end }}
+          {{ end }}
           {{ $hasImage := or $coverResource $imagePath }}
           <article class="list-card{{ if not $hasImage }} list-card--no-image{{ end }}">
             {{ if $hasImage }}
@@ -71,10 +80,8 @@
                   {{ end }}
                 </div>
               {{ end }}
-              {{ if $showSummary }}
-                {{ with $page.Summary }}
-                  <p class="list-card__summary">{{ . | plainify }}</p>
-                {{ end }}
+              {{ if and $showSummary $summaryText }}
+                <p class="list-card__summary">{{ $summaryText | plainify }}</p>
               {{ end }}
             </div>
           </article>

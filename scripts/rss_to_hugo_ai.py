@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import html
 import json
 import os
 import re
@@ -231,9 +232,34 @@ def gen_cover_image(prompt: str) -> bytes:
     return base64.b64decode(b64_data)
 
 
+_MARKDOWN_IMAGE_RE = re.compile(r"!\[[^\]]*\]\([^\)]+\)")
+_MARKDOWN_LINK_RE = re.compile(r"\[([^\]]+)\]\([^\)]+\)")
+_MARKDOWN_EMPH_RE = re.compile(r"[`*_~]{1,3}")
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def _plain_text(text: str) -> str:
+    """Convert Markdown/HTML content into a compact plain string."""
+
+    cleaned = html.unescape(text)
+    cleaned = _MARKDOWN_IMAGE_RE.sub("", cleaned)
+    cleaned = _MARKDOWN_LINK_RE.sub(r"\1", cleaned)
+    cleaned = re.sub(r"^#+\\s*", "", cleaned, flags=re.MULTILINE)
+    cleaned = _MARKDOWN_EMPH_RE.sub("", cleaned)
+    cleaned = _HTML_TAG_RE.sub(" ", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    return cleaned.strip()
+
+
+def _truncate(text: str, max_chars: int = 160) -> str:
+    text = text.strip()
+    if len(text) <= max_chars:
+        return text
+    return text[: max_chars - 1].rstrip() + "…"
+
+
 def _summary_from_article(article: str, max_chars: int = 160) -> str:
-    plain = re.sub(r"[\r\n]+", " ", article)
-    return plain[: max_chars - 3] + "..." if len(plain) > max_chars else plain
+    return _truncate(_plain_text(article), max_chars)
 
 
 def _toml_str(value: str) -> str:
@@ -248,7 +274,12 @@ def write_post(bundle_dir: Path, item: FeedItem, article_md: str, image_bytes: b
     cover_path = bundle_dir / cover_name
     cover_path.write_bytes(image_bytes)
 
-    summary = item.summary or _summary_from_article(article_md)
+    if item.summary:
+        summary = _truncate(_plain_text(item.summary))
+    else:
+        summary = _summary_from_article(article_md)
+
+    alt_text = _plain_text(item.title) or item.title
 
     front_lines = [
         "+++",
@@ -268,7 +299,7 @@ def write_post(bundle_dir: Path, item: FeedItem, article_md: str, image_bytes: b
             "",
             "[cover]",
             f"image = {_toml_str(cover_name)}",
-            f"alt = {_toml_str(item.title)}",
+            f"alt = {_toml_str(alt_text)}",
             "relative = true",
             "hidden = false",
             "+++",
