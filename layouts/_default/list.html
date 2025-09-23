@@ -52,10 +52,21 @@
           {{ $hasImage := or $coverResource $imagePath }}
           <article class="list-card{{ if not $hasImage }} list-card--no-image{{ end }}">
             {{ if $hasImage }}
+              {{/* cover.relative を読む */}}
+              {{ $coverRelative := false }}
+              {{ if $coverParams }}
+                {{ with $coverParams.relative }}{{ $coverRelative = . }}{{ end }}
+              {{ end }}
+
               <a class="list-card__image" href="{{ $page.RelPermalink }}">
-                {{ with $coverResource }}
-                  <img src="{{ .RelPermalink }}" alt="{{ $altText }}" loading="lazy" />
+                {{ if $coverResource }}
+                  {{/* ページバンドルの Resources から取れたらそれを使う（最優先） */}}
+                  <img src="{{ $coverResource.RelPermalink }}" alt="{{ $altText }}" loading="lazy" />
+                {{ else if and $imagePath $coverRelative }}
+                  {{/* relative:true ならページの相対パスに連結して解決 */}}
+                  <img src="{{ printf "%s%s" $page.RelPermalink $imagePath }}" alt="{{ $altText }}" loading="lazy" />
                 {{ else }}
+                  {{/* それ以外は従来通り（サイトルート/外部パス想定） */}}
                   <img src="{{ $imagePath | relURL }}" alt="{{ $altText }}" loading="lazy" />
                 {{ end }}
               </a>
