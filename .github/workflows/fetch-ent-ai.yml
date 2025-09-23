@@ -1,0 +1,51 @@
+# .github/workflows/fetch-ent-ai.yml
+name: RSS → AI記事&画像 → Hugo posts
+
+on:
+  schedule:
+    - cron: "0 * * * *"   # UTC毎時。JST毎時で動かすなら調整
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-posts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install feedparser requests python-slugify beautifulsoup4 tenacity
+
+      - name: Generate posts
+        env:
+          FEED_URL: "https://news.yahoo.co.jp/rss/topics/entertainment.xml"
+          HUGO_POSTS_DIR: "content/posts"     # 直下posts/なら "posts"
+          CATEGORY: "Entertainment"
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          # モデルや長さを必要に応じて調整
+          LLM_MODEL: "gpt-4o-mini"
+          IMG_MODEL: "gpt-image-1"
+        run: |
+          python scripts/rss_to_hugo_ai.py
+
+      - name: Commit & Push if changed
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            git config user.name  "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add -A
+            git commit -m "chore: AI-generated post(s) from Yahoo Entertainment RSS"
+            git push
+          else
+            echo "No changes."
+          fi
