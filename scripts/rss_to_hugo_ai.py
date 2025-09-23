@@ -54,13 +54,16 @@ def clean_text(html_or_text):
     return re.sub(r"\s+", " ", txt).strip()
 
 def build_dirname(title, published_struct):
-    # ディレクトリ名: YYYYMMDD-mmdd-slug
+    # ディレクトリ名: YYYYMMDD-mmdd-スラッグ
     dt = datetime.datetime.fromtimestamp(
         datetime.datetime(*published_struct[:6]).timestamp()
     ) if published_struct else datetime.datetime.utcnow()
     yyyyMMdd = dt.strftime("%Y%m%d")
     mmdd = dt.strftime("%m%d")
-    slug = slugify(title)[:60] or "untitled"
+    # ★日本語をそのまま許可（ピンイン化しない）
+    slug = slugify(title, allow_unicode=True)[:60] or "無題"
+    # 先頭/末尾のハイフンを整える
+    slug = slug.strip("-")
     return f"{yyyyMMdd}-{mmdd}-{slug}", dt
 
 def jst_iso(dt):
@@ -232,7 +235,7 @@ def gen_image_png(title, extra_hint_tags=None):
     payload = {
         "model": IMG_MODEL,
         "prompt": prompt,
-        "size": "1024x576",   # 横長
+        "size": "1536x1024",   # 横長
         "n": 1,
     }
     r = post_openai(f"{OPENAI_BASE}/images/generations", payload, timeout=120)
