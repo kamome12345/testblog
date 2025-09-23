@@ -1,6 +1,5 @@
 # scripts/rss_to_hugo_ai.py
 import os, re, json, time, pathlib, datetime, base64
-from urllib.parse import urlparse
 import feedparser, requests
 from bs4 import BeautifulSoup
 from slugify import slugify
@@ -55,15 +54,22 @@ def clean_text(html_or_text):
     return re.sub(r"\s+", " ", txt).strip()
 
 def build_dirname(title, published_struct):
-    dt = datetime.datetime.fromtimestamp(time.mktime(published_struct)) if published_struct else datetime.datetime.now()
+    # ディレクトリ名: YYYYMMDD-mmdd-slug
+    dt = datetime.datetime.fromtimestamp(
+        datetime.datetime(*published_struct[:6]).timestamp()
+    ) if published_struct else datetime.datetime.utcnow()
     yyyyMMdd = dt.strftime("%Y%m%d")
     mmdd = dt.strftime("%m%d")
     slug = slugify(title)[:60] or "untitled"
     return f"{yyyyMMdd}-{mmdd}-{slug}", dt
 
 def jst_iso(dt):
-    # GitHub ActionsはUTCなので+09:00を付与
+    # 与えられた naive dt を JST(+09:00) のISO表記に
     return (dt + datetime.timedelta(hours=9)).isoformat(timespec="seconds") + "+09:00"
+
+def now_jst_iso():
+    # 現在時刻を JST(+09:00) のISO表記に
+    return (datetime.datetime.utcnow() + datetime.timedelta(hours=9)).isoformat(timespec="seconds") + "+09:00"
 
 def openai_headers():
     return {
@@ -110,7 +116,6 @@ def post_openai(url, payload, timeout=60, max_attempts=5):
         try:
             r.raise_for_status()
         except requests.HTTPError as e:
-            # 401などはメッセージを明確化
             if r.status_code == 401:
                 raise SystemExit("OpenAI: 認証エラー（APIキーが正しいか確認してください）。") from e
             raise
@@ -170,12 +175,19 @@ def gen_image_png(title):
     raise RuntimeError("No image data")
 
 # ====== Front Matter ======
-def build_front_matter(title, date_iso, link, summary_for_meta, include_cover: bool):
+def build_front_matter(title, date_iso, publish_iso, link, summary_for_meta, include_cover: bool):
+    """
+    date:        “出来事”の日時（RSS由来、JST変換）
+    publishDate: 実際の公開日時（今のJST）
+    lastmod:     更新日時（publishDateと同じでOK）
+    """
     sanitized_title = title.replace('"', "'")
     fm = [
         "---",
         f'title: "{sanitized_title}"',
         f"date: {date_iso}",
+        f"publishDate: {publish_iso}",
+        f"lastmod: {publish_iso}",
         "draft: false",
         f'categories: ["{CATEGORY}"]',
         'tags: ["AI記事","Entertainment"]',
@@ -198,26 +210,34 @@ def main():
     seen = load_seen()
     feed = feedparser.parse(FEED_URL)
     created = 0
+    checked = 0
 
     for e in feed.entries:
         if created >= MAX_NEW_POSTS:
             break
 
         eid = e.get("id") or e.get("link")
-        if not eid or eid in seen:
+        if not eid:
+            print("[SKIP] entry without id/link")
+            continue
+        if eid in seen:
+            print(f"[SKIP] already seen: {eid}")
             continue
 
+        checked += 1
         title = (e.get("title") or "").strip()
-        link  = (e.get("link") or "").strip()
+        link  = (e.get("link")  or "").strip()
         published = e.get("published_parsed") or e.get("updated_parsed")
         dirname, dt = build_dirname(title, published)
         post_dir = pathlib.Path(POSTS_DIR) / dirname
         post_dir.mkdir(parents=True, exist_ok=True)
 
         rss_summary = clean_text(e.get("summary") or e.get("description", ""))
-        date_iso = jst_iso(dt)
+        date_iso = jst_iso(dt)          # 出来事の日時（JST）
+        publish_iso = now_jst_iso()     # 公開日時（今・JST）
 
         try:
+            print(f"[TRY] create: {dirname}")
             # 1) 本文生成
             article_md = gen_article(title, link, rss_summary)
 
@@ -233,7 +253,11 @@ def main():
                     print(f"[WARN] image generation failed: {img_ex}")
 
             # 3) Front Matter + 本文の index.md 出力
-            fm = build_front_matter(title, date_iso, link, rss_summary or title, include_cover=has_image)
+            fm = build_front_matter(
+                title, date_iso, publish_iso, link,
+                rss_summary or title,
+                include_cover=has_image
+            )
             body = fm + article_md + "\n\n---\n参考リンク: " + link + "\n"
             with open(post_dir / "index.md", "w", encoding="utf-8") as f:
                 f.write(body)
@@ -241,24 +265,24 @@ def main():
             # 4) 既読登録
             seen.add(eid)
             created += 1
+            print(f"[OK] created: {post_dir}")
 
-            # 429対策：次の生成に進む前に少し待つ（理論上は1件で抜けるが保険）
+            # 保険で少し待つ（次ループに進む前）
             time.sleep(2)
 
         except requests.HTTPError as http_ex:
-            # エラー本文からヒントを出す
             try:
                 err = http_ex.response.json()
                 print(f"[ERROR] HTTP {http_ex.response.status_code}: {err}")
             except Exception:
                 print(f"[ERROR] {http_ex}")
-            # 失敗しても他のエントリに進む（ただしMAX_NEW_POSTSが1なので通常ここで終わる）
             continue
         except Exception as ex:
             print(f"[ERROR] Unexpected: {ex}")
             continue
 
     save_seen(seen)
+    print(f"Checked entries: {checked}")
     print(f"Created posts: {created}")
 
 if __name__ == "__main__":
