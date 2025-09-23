@@ -109,9 +109,10 @@ def gen_image_png(title):
     raise RuntimeError("No image data")
 
 def build_front_matter(title, date_iso, link, summary_for_meta):
+    sanitized_title = title.replace('"', "'")
     fm = [
         "---",
-        f'title: "{title.replace(\'"\', "\'")}"',
+        f'title: "{sanitized_title}"',
         f"date: {date_iso}",
         "draft: false",
         f'categories: ["%s"]' % CATEGORY,
@@ -119,13 +120,14 @@ def build_front_matter(title, date_iso, link, summary_for_meta):
         f'canonicalURL: "{link}"',
         "cover:",
         '  image: "featured.png"',
-        f'  alt: "{title.replace(\'"\', "\'")}"',
+        f'  alt: "{sanitized_title}"',
         "  relative: true",
         'description: "' + summary_for_meta.replace('"', "'")[:150] + '"',
         "---",
         "",
     ]
     return "\n".join(fm)
+
 
 def main():
     if not OPENAI_KEY:
