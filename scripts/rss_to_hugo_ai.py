@@ -30,6 +30,9 @@ if not OPENAI_KEY.startswith("sk-"):
 # 既読管理
 SEEN_PATH = "data/seen_entertainment_ids.json"
 
+# ★追加：ミケ記者の一言の重複回避用
+MIKE_SEEN_PATH = "data/seen_mike_comments.json"
+
 # 出力先のディレクトリを用意
 pathlib.Path(POSTS_DIR).mkdir(parents=True, exist_ok=True)
 pathlib.Path("data").mkdir(parents=True, exist_ok=True)
@@ -79,6 +82,32 @@ def openai_headers():
         "Authorization": f"Bearer {OPENAI_KEY}",
         "Content-Type": "application/json",
     }
+
+# ====== ミケ重複管理 ======
+def load_seen_mike():
+    p = MIKE_SEEN_PATH
+    if not os.path.exists(p):
+        return set()
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            arr = json.load(f)
+            return set(arr if isinstance(arr, list) else [])
+    except Exception:
+        return set()
+
+def save_seen_mike(seen:set, keep_last=500):
+    arr = list(seen)
+    if len(arr) > keep_last:
+        arr = arr[-keep_last:]
+    with open(MIKE_SEEN_PATH, "w", encoding="utf-8") as f:
+        json.dump(arr, f, ensure_ascii=False, indent=2)
+
+def _norm_mike(s: str) -> str:
+    # 空白・句読点などを落として近似重複も抑える（簡易）
+    s = re.sub(r"\s+", "", s)
+    s = re.sub(r"[。、．，!！?？・…~〜\-—_（）\(\)「」『』\"'“”’`]", "", s)
+    return s
+
 
 # ====== OpenAI呼び出し（429/クォータ差分を判定しつつリトライ） ======
 def post_openai(url, payload, timeout=60, max_attempts=5):
@@ -130,11 +159,13 @@ LLM_SYS_PROMPT = """あなたはブログ編集者です。以下の入力（ニ
 著作権や虚偽報道を避けるため、記事本文は一次記事からのコピペや要約ではなく、あなた自身のオリジナル文章で、
 背景説明・用語解説・影響・関連トピック紹介・過去事例比較など“付加価値のある解説記事”を日本語で作成してください。
 
-同時に、トップ一覧の description 用として「ミケ記者（優しい三毛猫の記者）」による一言メッセージを生成してください。
-- 1文だけ、やさしく共感/心配/喜びなどの感情が伝わる
+同時に、トップ一覧の description 用として「ミケ記者（優しい三毛猫の記者）」による一言メッセージ候補を6つ生成してください。
+- 1文だけ、**思わず本文を読みたくなる**導入（問いかけ/驚き/気づき/優しい励まし など）を使う
+- それぞれ**語り口を変えて**重複を避ける（語尾・語順・表現を変化させる）
 - 語尾は必ず「にゃ」で終える（絵文字・顔文字は使わない）
-- 30〜60文字程度
+- 文字数は **30〜60字** 目安（長すぎ/短すぎを避ける）
 - 固有名詞や断定的表現は避け、誰かを傷つけない配慮
+- 例：「もしかして…？」「やばい○○」等の**フック**を混ぜる
 
 さらに、記事に付与するタグも抽出してください。
 - 日本語の一般名詞だけ（例：芸人、女優、俳優、マンガ、結婚、イベント、音楽 等）
@@ -144,7 +175,7 @@ LLM_SYS_PROMPT = """あなたはブログ編集者です。以下の入力（ニ
 最終出力は JSON のみで返してください（コードブロックや説明文は禁止）:
 {
   "article_md": "<Markdown本文>",
-  "mike_comment": "<ミケ記者の一言（〜にゃ）>",
+  "mike_candidates": ["候補1","候補2","候補3","候補4","候補5","候補6"],
   "tags": ["タグ1","タグ2","タグ3"]
 }
 
@@ -155,6 +186,7 @@ LLM_SYS_PROMPT = """あなたはブログ編集者です。以下の入力（ニ
 - 出典リンクは末尾に1つだけ掲載（与えられたURL）
 - 中立・丁寧なトーン
 """
+
 
 LLM_USER_TEMPLATE = """題名: {title}
 参考URL: {url}
@@ -205,27 +237,55 @@ def sanitize_tags(raw):
     return uniq[:5]
 
 # ====== LLM/画像 生成関数 ======
-def gen_article_comment_tags(title, url, summary):
+def gen_article_comment_tags(title, url, summary, seen_mike_normed:set):
     payload = {
         "model": LLM_MODEL,
         "messages": [
             {"role": "system", "content": LLM_SYS_PROMPT},
             {"role": "user", "content": LLM_USER_TEMPLATE.format(title=title, url=url, summary=summary or "（なし）")},
         ],
-        "temperature": 0.7,
+        "temperature": 0.8,  # すこし多様性を上げる
     }
     r = post_openai(f"{OPENAI_BASE}/chat/completions", payload, timeout=60)
     obj = parse_json_strict_or_slice(r.json()["choices"][0]["message"]["content"])
     article_md = (obj.get("article_md") or "").strip()
-    mike_comment = (obj.get("mike_comment") or "").strip()
+    cands = obj.get("mike_candidates") or []
     tags = sanitize_tags(obj.get("tags"))
-    # ミケの一言サニタイズ
-    mike_comment = re.sub(r"\s+", " ", mike_comment)
-    if not mike_comment.endswith("にゃ"):
-        mike_comment = (mike_comment.rstrip("。.!?、，") + "にゃ").strip()
-    if len(mike_comment) > 120:
-        mike_comment = mike_comment[:118].rstrip() + "にゃ"
-    return article_md, mike_comment, tags
+
+    # 正規化してユニーク選抜
+    picked = None
+    picked_norm = None
+    for raw in cands:
+        if not isinstance(raw, str):
+            continue
+        line = re.sub(r"\s+", " ", raw.strip())
+        if not line:
+            continue
+        if not line.endswith("にゃ"):
+            line = (line.rstrip("。.!?、，") + "にゃ").strip()
+        if len(line) < 20 or len(line) > 80:
+            # 長さが外れすぎたらスキップ（ゆるめ）
+            pass
+        normed = _norm_mike(line)
+        if normed and normed not in seen_mike_normed:
+            picked = line
+            picked_norm = normed
+            break
+
+    # 全滅時のフォールバック：最初の候補を整形
+    if not picked and cands:
+        line = re.sub(r"\s+", " ", str(cands[0]).strip())
+        if not line.endswith("にゃ"):
+            line = (line.rstrip("。.!?、，") + "にゃ").strip()
+        picked = line
+        picked_norm = _norm_mike(line)
+
+    # 最終サニタイズ
+    if picked and len(picked) > 120:
+        picked = picked[:118].rstrip() + "にゃ"
+
+    return article_md, picked, picked_norm, tags
+
 
 def gen_image_png(title, extra_hint_tags=None):
     hint = ""
@@ -293,6 +353,7 @@ def build_front_matter(title, date_iso, publish_iso, link, description_text, inc
 # ====== メイン処理 ======
 def main():
     seen = load_seen()
+    seen_mike_normed = load_seen_mike() 
     feed = feedparser.parse(FEED_URL)
     created = 0
     checked = 0
@@ -348,6 +409,8 @@ def main():
 
             # 4) 既読登録
             seen.add(eid)
+            if mike_norm:
+                seen_mike_normed.add(mike_norm)   # ★追加
             created += 1
             print(f"[OK] created: {post_dir}")
 
@@ -365,6 +428,7 @@ def main():
             continue
 
     save_seen(seen)
+    save_seen_mike(seen_mike_normed) 
     print(f"Checked entries: {checked}")
     print(f"Created posts: {created}")
 
