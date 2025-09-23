@@ -1,42 +1,81 @@
-# .github/workflows/fetch-ent-ai.yml
 name: RSS → AI記事&画像 → Hugo posts
 
 on:
   schedule:
-    - cron: "0 * * * *"   # UTC毎時。JST毎時で動かすなら調整
-  workflow_dispatch:
+    - cron: "0 * * * *"      # UTCで毎時0分（JSTなら毎時9分）
+  workflow_dispatch:          # 手動実行
+  push:                       # スクリプトやこのYAMLを更新した時にも走る
+    paths:
+      - "scripts/**"
+      - ".github/workflows/fetch-ent-ai.yml"
+      - "data/**"
 
 permissions:
   contents: write
 
+# ★ 同時起動を禁止（手動とスケジュールが重なっても1本だけ）
+concurrency:
+  group: rss-ai-generate
+  cancel-in-progress: true
+
 jobs:
   build-posts:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
           persist-credentials: true
 
-      - uses: actions/setup-python@v5
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+
+      # （任意だが便利）キーの“形”だけ検査して即落ち
+      - name: Preflight: check OPENAI_API_KEY shape (masked)
+        run: |
+          if [ -z "${OPENAI_API_KEY}" ]; then
+            echo "OPENAI_API_KEY is empty"; exit 1
+          fi
+          case "${OPENAI_API_KEY}" in
+            sk-*) echo "OPENAI key shape OK";;
+            *) echo "OPENAI_API_KEY does not look like sk-..."; exit 1;;
+          esac
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 
       - name: Install deps
         run: |
           python -m pip install --upgrade pip
-          pip install feedparser requests python-slugify beautifulsoup4 tenacity
+          pip install feedparser requests python-slugify beautifulsoup4
 
       - name: Generate posts
         env:
           FEED_URL: "https://news.yahoo.co.jp/rss/topics/entertainment.xml"
-          HUGO_POSTS_DIR: "content/posts"     # 直下posts/なら "posts"
+          HUGO_POSTS_DIR: "content/posts"   # 直下posts/なら "posts" に
           CATEGORY: "Entertainment"
+
+          # OpenAI
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          # モデルや長さを必要に応じて調整
+          OPENAI_BASE: "https://api.openai.com/v1"   # 将来Groq等に切替える時に差し替え
+
+          # モデル（必要に応じて変更）
           LLM_MODEL: "gpt-4o-mini"
           IMG_MODEL: "gpt-image-1"
+
+          # ★ 429対策：1回の実行で作る件数を1件に
+          MAX_NEW_POSTS: "1"
+
+          # （テスト用オプション）画像生成をスキップするなら "1"
+          SKIP_IMAGE: "0"
+        run: python scripts/rss_to_hugo_ai.py
+
+      - name: Show git status (debug)
         run: |
-          python scripts/rss_to_hugo_ai.py
+          git status --porcelain
+          ls -R "${HUGO_POSTS_DIR}" || true
 
       - name: Commit & Push if changed
         run: |
@@ -44,7 +83,7 @@ jobs:
             git config user.name  "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add -A
-            git commit -m "chore: AI-generated post(s) from Yahoo Entertainment RSS"
+            git commit -m "chore: AI-generated post(s)"
             git push
           else
             echo "No changes."
