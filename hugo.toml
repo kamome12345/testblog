@@ -9,6 +9,9 @@ summaryLength = 30
 # Git の最終更新時刻を Lastmod として使う（更新日時表示用）
 enableGitInfo = true
 
+# timeZoneを明示　サイト全体をJSTに
+timeZone = "Asia/Tokyo"
+
 # タグ・カテゴリ（/tags/ /categories/ 生成）
 [taxonomies]
   tag = "tags"
