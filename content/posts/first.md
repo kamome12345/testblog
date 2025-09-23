@@ -6,7 +6,7 @@ summaryLength = 30
 tags = ["俳優", "結婚"]
 
 [cover]
-image = "/images/glass.png"
+image = "images/glass.png"
 alt = "グラス"
 relative = false
 hidden = false
