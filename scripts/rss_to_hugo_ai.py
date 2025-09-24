@@ -57,17 +57,17 @@ def clean_text(html_or_text):
     return re.sub(r"\s+", " ", txt).strip()
 
 def build_dirname(title, published_struct):
-    # ディレクトリ名: YYYYMMDD-mmdd-スラッグ
+    # ディレクトリ名: YYYYMMDD-hhmmss-スラッグ（時間情報も含める）
     dt = datetime.datetime.fromtimestamp(
         datetime.datetime(*published_struct[:6]).timestamp()
     ) if published_struct else datetime.datetime.utcnow()
     yyyyMMdd = dt.strftime("%Y%m%d")
-    mmdd = dt.strftime("%m%d")
+    hhmmss = dt.strftime("%H%M%S")
     # ★日本語をそのまま許可（ピンイン化しない）
     slug = slugify(title, allow_unicode=True)[:60] or "無題"
     # 先頭/末尾のハイフンを整える
     slug = slug.strip("-")
-    return f"{yyyyMMdd}-{mmdd}-{slug}", dt
+    return f"{yyyyMMdd}-{hhmmss}-{slug}", dt
 
 def jst_iso(dt):
     # 与えられた naive dt を JST(+09:00) のISO表記に
