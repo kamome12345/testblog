@@ -2,6 +2,7 @@ baseURL = "https://kamome12345.github.io/testblog/"
 languageCode = "ja-jp"
 title = "ゴシッぷにゃ"
 theme = "papermod"
+buildFuture = true
 
 # 要約の長さ（一覧で本文を出さず“要約だけ”にする）
 summaryLength = 30
