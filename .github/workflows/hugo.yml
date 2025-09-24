@@ -4,6 +4,10 @@ on:
   push:
     branches: [ "main" ]   # mainにpushされたら動く
   workflow_dispatch:        # 手動実行も可
+  workflow_run:             # RSS → AI記事… の完了時にも実行
+    workflows: ["RSS → AI記事&画像 → Hugo posts"]
+    types:
+      - completed
 
 permissions:
   contents: read
@@ -16,6 +20,7 @@ concurrency:
 
 jobs:
   build:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -23,6 +28,7 @@ jobs:
         with:
           submodules: true        # テーマをgit submoduleで入れてる場合はtrue
           fetch-depth: 0
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
 
       - name: Setup Hugo
         uses: peaceiris/actions-hugo@v2
