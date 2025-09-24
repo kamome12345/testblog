@@ -1,7 +1,7 @@
 ---
 title: "ドラクエに秘められた都市伝説とは？"
 date: 2025-09-24T06:31:44+09:00
-publishDate: 2025-09-23T06:00:00+09:00
+publishDate: 2025-09-24T06:31:00+09:00
 lastmod: 2025-09-24T07:08:25+09:00
 draft: false
 categories: ["Entertainment"]
