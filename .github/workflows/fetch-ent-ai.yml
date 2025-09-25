@@ -1,8 +1,8 @@
 name: RSS → AI記事&画像 → Hugo posts
 
 on:
-  schedule:
-    - cron: "0 * * * *"      # UTCで毎時0分（JSTなら毎時9分）
+  # schedule:
+  #   - cron: "0 * * * *"      # UTCで毎時0分（JSTなら毎時9分）
   workflow_dispatch:          # 手動実行
   push:                       # スクリプトやこのYAMLを更新した時にも走る
     paths:
